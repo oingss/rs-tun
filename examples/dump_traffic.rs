@@ -18,7 +18,7 @@
 //!
 //! Windows 下需要以管理员身份运行；示例内嵌了 wintun.dll，无需额外安装。
 
-use reflex_tun::{TunInbound, TunInboundConfig};
+use reflex_tun::{InboundTcpStream, InboundUdpPacket, TunInbound, TunInboundConfig};
 use tokio::sync::mpsc;
 
 #[tokio::main]
@@ -39,8 +39,8 @@ async fn main() -> anyhow::Result<()> {
         }"#,
     )?;
 
-    let (tcp_tx, mut tcp_rx) = mpsc::channel(1024);
-    let (udp_tx, mut udp_rx) = mpsc::channel(1024);
+    let (tcp_tx, mut tcp_rx) = mpsc::channel::<InboundTcpStream>(1024);
+    let (udp_tx, mut udp_rx) = mpsc::channel::<InboundUdpPacket>(1024);
 
     // 消费入站 TCP 连接：真实项目中这里会转给路由层选择出站。
     let tcp_task = tokio::spawn(async move {
