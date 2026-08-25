@@ -1,7 +1,4 @@
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    process::Command,
-};
+use std::{net::IpAddr, process::Command};
 use tracing::{info, warn};
 
 use super::SetupState;
@@ -88,11 +85,11 @@ fn exclude_routes_v6(cfg: &TunInboundConfig) -> Vec<String> {
 // 使用 AF_ROUTE socket 直接发送路由消息到内核，替代 `route` 命令。
 // macOS 的路由 socket 使用 RTM_ADD/RTM_DELETE 消息。
 
-use libc::{AF_ROUTE, RTF_GATEWAY, RTF_STATIC, RTF_UP, RTM_ADD, RTM_DELETE, SOCK_RAW};
-use std::mem;
+use libc::{AF_ROUTE, SOCK_RAW};
 use std::os::unix::io::RawFd;
 
 /// AF_ROUTE socket 文件描述符封装。
+#[allow(dead_code)]
 struct RouteSocket {
     fd: RawFd,
 }
@@ -167,7 +164,7 @@ impl RouteSocket {
 
         cmd.arg("-net").arg(dst);
         if let Some(gw) = gateway {
-            cmd.arg(&gw.to_string());
+            cmd.arg(gw.to_string());
         }
         if let Some(name) = if_name {
             cmd.arg("-interface").arg(name);
@@ -177,6 +174,7 @@ impl RouteSocket {
     }
 
     /// 删除路由条目。
+    #[allow(dead_code)]
     fn delete_route(&self, dst: &str) -> bool {
         let mut cmd = Command::new("route");
         cmd.arg("-n").arg("delete");

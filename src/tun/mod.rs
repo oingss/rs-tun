@@ -617,6 +617,9 @@ impl TcpNat {
 
     /// 清空全部 NAT 会话（对齐 sing-tun ResetNetwork：网络切换时调用）。
     /// 锁顺序：addr_map → port_map（与 lookup_or_insert 一致）。
+    /// 仅 Linux/Android 接线了 interface_monitor 网络切换回调（见上方注释），
+    /// 其余平台暂未调用，避免 dead_code 误报。
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub(crate) async fn clear(&self) {
         self.addr_map.write().await.clear();
         self.port_map.write().await.clear();

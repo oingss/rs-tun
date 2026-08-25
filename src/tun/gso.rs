@@ -149,6 +149,7 @@ pub struct GsoOptions {
 }
 
 impl VirtioNetHdr {
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_gso_options(&self) -> std::io::Result<GsoOptions> {
         let gso_type = match self.gso_type {
             VIRTIO_NET_HDR_GSO_NONE => GsoType::None,

@@ -1,8 +1,6 @@
 use std::{
-    collections::HashSet,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     process::Command,
-    sync::Mutex,
 };
 use tracing::{info, warn};
 
@@ -156,109 +154,6 @@ fn build_excluded_uid_ranges(cfg: &TunInboundConfig) -> Vec<(u32, u32)> {
     } else {
         merge_ranges(exclude)
     }
-}
-
-// ── 接口监控 ──────────────────────────────────────────────────────────────────
-//
-// 使用 rtnetlink 监听链路事件（RTM_NEWLINK/RTM_DELLINK），
-// 在接口 UP/DOWN 或创建/删除时回调更新路由规则。
-// 替代 sing-tun 的 InterfaceMonitor。
-
-static INTERFACE_MONITOR: once_cell::sync::Lazy<Mutex<InterfaceMonitorState>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(InterfaceMonitorState::default()));
-
-#[allow(clippy::type_complexity)]
-#[derive(Default)]
-struct InterfaceMonitorState {
-    callbacks: Vec<(usize, Box<dyn Fn(&InterfaceEvent) + Send>)>,
-    next_id: usize,
-    running: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct InterfaceEvent {
-    pub name: String,
-    pub index: u32,
-    pub up: bool,
-    pub addresses: Vec<IpAddr>,
-}
-
-/// 注册接口变更回调。返回的 ID 用于取消注册。
-pub async fn register_interface_callback<F>(cb: F) -> usize
-where
-    F: Fn(&InterfaceEvent) + Send + 'static,
-{
-    let mut state = INTERFACE_MONITOR.lock().unwrap();
-    let id = state.next_id;
-    state.next_id += 1;
-    state.callbacks.push((id, Box::new(cb)));
-
-    if !state.running {
-        state.running = true;
-        // 启动监控 task
-        tokio::spawn(interface_monitor_task());
-    }
-    id
-}
-
-/// 取消接口监听回调。
-pub async fn unregister_interface_callback(id: usize) {
-    let mut state = INTERFACE_MONITOR.lock().unwrap();
-    state.callbacks.retain(|(i, _)| *i != id);
-}
-
-async fn interface_monitor_task() {
-    // 使用 rtnetlink 监听链路事件
-    // 在实际实现中，需要建立 netlink 连接并监听 RTMGRP_LINK | RTMGRP_IPV4_IFADDR
-    // 这里使用 tokio::fs::watcher 风格轮询 /proc/net/dev 作为简化实现
-    let mut last_ifaces = HashSet::new();
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
-
-    loop {
-        interval.tick().await;
-        let current = scan_interfaces();
-        if current != last_ifaces {
-            last_ifaces = current;
-            let state = INTERFACE_MONITOR.lock().unwrap();
-            for (_, cb) in &state.callbacks {
-                // 简化：只通知有变化
-                // 实际应扫描新旧差异逐个通知
-                for iface in &last_ifaces {
-                    // 解析 iface 格式: "name:index:up"
-                    let parts: Vec<&str> = iface.split(':').collect();
-                    if parts.len() >= 3 {
-                        let event = InterfaceEvent {
-                            name: parts[0].to_string(),
-                            index: parts[1].parse().unwrap_or(0),
-                            up: parts[2] == "1",
-                            addresses: vec![],
-                        };
-                        cb(&event);
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// 扫描 /sys/class/net 获取当前接口列表。
-fn scan_interfaces() -> HashSet<String> {
-    let mut ifaces = HashSet::new();
-    if let Ok(entries) = std::fs::read_dir("/sys/class/net") {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let up_path = entry.path().join("operstate");
-            let up = std::fs::read_to_string(&up_path)
-                .map(|s| s.trim() == "up")
-                .unwrap_or(false);
-            let index_path = entry.path().join("ifindex");
-            let index = std::fs::read_to_string(&index_path)
-                .map(|s| s.trim().parse::<u32>().unwrap_or(0))
-                .unwrap_or(0);
-            ifaces.insert(format!("{name}:{index}:{}", if up { 1 } else { 0 }));
-        }
-    }
-    ifaces
 }
 
 // ── autoRedirect (nftables TPROXY) ────────────────────────────────────────────
@@ -1217,28 +1112,6 @@ pub async fn teardown(
     cleanup_nftables_redirect(cfg, if_name);
 
     info!(interface = %if_name, "tun: auto_route cleaned up (Linux)");
-    Ok(())
-}
-
-pub fn update_routes(cfg: &TunInboundConfig, if_name: &str) -> anyhow::Result<()> {
-    // 对齐 sing-tun UpdateRouteOptions：清空 TUN 表路由后按新配置重建。
-    // 旧实现是 no-op（L3）。
-    let table = cfg.iproute2_table_index;
-    Command::new("ip")
-        .args(["route", "flush", "table", &table.to_string()])
-        .output()
-        .ok();
-    Command::new("ip")
-        .args(["-6", "route", "flush", "table", &table.to_string()])
-        .output()
-        .ok();
-
-    let addrs = parse_addresses(cfg);
-    let has_v4 = !addrs.inet4.is_empty();
-    let has_v6 = !addrs.inet6.is_empty();
-    let mut state = SetupState::default();
-    add_routes_to_table(cfg, if_name, table, has_v4, has_v6, &mut state);
-    info!(interface = %if_name, table = %table, "tun: routes updated (Linux)");
     Ok(())
 }
 

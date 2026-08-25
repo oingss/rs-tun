@@ -546,10 +546,6 @@ pub async fn teardown(
     Ok(())
 }
 
-pub fn update_routes(_cfg: &TunInboundConfig, _if_name: &str) -> anyhow::Result<()> {
-    Ok(())
-}
-
 // ── Android VPN 检测 ──────────────────────────────────────────────────────────
 // 通过读取 netlink 规则中 0x20000 mark 判断系统 VPN 是否启用。
 // Android VpnService 启用时会自动添加 `fwmark 0x20000 lookup <table>` 规则。

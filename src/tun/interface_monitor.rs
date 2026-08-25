@@ -516,7 +516,7 @@ mod tests {
         assert!(diff_events(&[a], &[b]).len() == 1);
         // 无变化
         let c = mk(vec!["192.168.1.2".parse().unwrap()]);
-        assert!(diff_events(&[c.clone()], &[c]).is_empty());
+        assert!(diff_events(std::slice::from_ref(&c), &[c]).is_empty());
     }
 
     #[cfg(target_os = "linux")]
@@ -530,11 +530,11 @@ mod tests {
             m
         };
         let mut buf = Vec::new();
-        buf.extend_from_slice(&mk_msg(libc::RTM_NEWLINK as u16));
+        buf.extend_from_slice(&mk_msg(libc::RTM_NEWLINK));
         assert!(netlink_events::parse_messages(&buf));
         let mut buf2 = Vec::new();
-        buf2.extend_from_slice(&mk_msg(libc::RTM_NEWADDR as u16));
-        buf2.extend_from_slice(&mk_msg(libc::RTM_DELROUTE as u16));
+        buf2.extend_from_slice(&mk_msg(libc::RTM_NEWADDR));
+        buf2.extend_from_slice(&mk_msg(libc::RTM_DELROUTE));
         assert!(netlink_events::parse_messages(&buf2));
         // 无关类型（如 NLMSG_ERROR=2）
         let mut buf3 = Vec::new();

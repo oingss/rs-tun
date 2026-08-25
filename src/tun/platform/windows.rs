@@ -144,7 +144,7 @@ mod win32_route {
     };
     use anyhow::anyhow;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use tracing::{debug, error, warn};
+    use tracing::{debug, error};
 
     fn encode_wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -346,41 +346,6 @@ mod win32_route {
             .ok()
             .inspect_err(|e| error!("DeleteIpForwardEntry2 (v6) failed: {}", e))
             .map_err(|e| std::io::Error::other(e.message()))
-    }
-
-    /// 删除接口上的全部路由（对齐 sing-tun FlushRoutes，用于 UpdateRouteOptions）。
-    pub fn flush_routes(luid: NET_LUID_LH) -> std::io::Result<()> {
-        unsafe {
-            let mut table: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
-            let r = GetIpForwardTable2(AF_UNSPEC, &mut table);
-            if r.0 != 0 {
-                return Err(std::io::Error::other(format!(
-                    "GetIpForwardTable2 failed: Win32 error {}",
-                    r.0
-                )));
-            }
-            if table.is_null() {
-                return Ok(());
-            }
-            let count = (*table).NumEntries as usize;
-            let entries = std::slice::from_raw_parts((*table).Table.as_ptr(), count);
-            let mut last_err: Option<u32> = None;
-            for row in entries {
-                if row.InterfaceLuid.Value == luid.Value {
-                    let r2 = DeleteIpForwardEntry2(row);
-                    if r2.0 != 0 && last_err.is_none() {
-                        last_err = Some(r2.0);
-                    }
-                }
-            }
-            FreeMibTable(table as *const core::ffi::c_void);
-            match last_err {
-                Some(e) => Err(std::io::Error::other(format!(
-                    "DeleteIpForwardEntry2 failed: Win32 error {e}"
-                ))),
-                None => Ok(()),
-            }
-        }
     }
 
     /// 添加接口单播地址（v4，对齐 sing-tun AddIPAddress：DadState=Preferred，
@@ -773,11 +738,13 @@ mod wfp {
             if_index: u32,
             name: &str,
         ) -> std::io::Result<()> {
-            let mut cond = FWPM_FILTER_CONDITION0::default();
-            // windows crate 0.58 无 FWPM_CONDITION_LOCAL_INTERFACE_INDEX；
-            // ALE_AUTH_CONNECT 层接口条件使用 FWPM_CONDITION_ARRIVAL_INTERFACE_INDEX。
-            cond.fieldKey = FWPM_CONDITION_ARRIVAL_INTERFACE_INDEX;
-            cond.matchType = FWP_MATCH_EQUAL;
+            let mut cond = FWPM_FILTER_CONDITION0 {
+                // windows crate 0.58 无 FWPM_CONDITION_LOCAL_INTERFACE_INDEX；
+                // ALE_AUTH_CONNECT 层接口条件使用 FWPM_CONDITION_ARRIVAL_INTERFACE_INDEX。
+                fieldKey: FWPM_CONDITION_ARRIVAL_INTERFACE_INDEX,
+                matchType: FWP_MATCH_EQUAL,
+                ..Default::default()
+            };
             cond.conditionValue.r#type = FWP_UINT32;
             cond.conditionValue.Anonymous.uint32 = if_index;
             self.add_filter(
@@ -814,9 +781,11 @@ mod wfp {
         }
 
         fn make_app_id_condition(&self, appid: &FWP_BYTE_BLOB) -> FWPM_FILTER_CONDITION0 {
-            let mut cond = FWPM_FILTER_CONDITION0::default();
-            cond.fieldKey = FWPM_CONDITION_ALE_APP_ID;
-            cond.matchType = FWP_MATCH_EQUAL;
+            let mut cond = FWPM_FILTER_CONDITION0 {
+                fieldKey: FWPM_CONDITION_ALE_APP_ID,
+                matchType: FWP_MATCH_EQUAL,
+                ..Default::default()
+            };
             cond.conditionValue.r#type = FWP_BYTE_BLOB_TYPE;
             // windows crate 0.58: byteBlob 字段是 *mut FWP_BYTE_BLOB（不是值类型）
             cond.conditionValue.Anonymous.byteBlob =
@@ -825,9 +794,11 @@ mod wfp {
         }
 
         fn make_uint16_condition(&self, key: GUID, value: u16) -> FWPM_FILTER_CONDITION0 {
-            let mut cond = FWPM_FILTER_CONDITION0::default();
-            cond.fieldKey = key;
-            cond.matchType = FWP_MATCH_EQUAL;
+            let mut cond = FWPM_FILTER_CONDITION0 {
+                fieldKey: key,
+                matchType: FWP_MATCH_EQUAL,
+                ..Default::default()
+            };
             cond.conditionValue.r#type = FWP_UINT16;
             cond.conditionValue.Anonymous.uint16 = value;
             cond
@@ -1764,47 +1735,4 @@ pub fn teardown(cfg: &TunInboundConfig, if_name: &str, state: &SetupState) -> an
     Ok(())
 }
 
-pub fn update_routes(cfg: &TunInboundConfig, if_name: &str) -> anyhow::Result<()> {
-    // 修复 M3：旧实现是 no-op，路由无法热更新。
-    // 对齐 sing-tun UpdateRouteOptions：flush 本接口全部路由后按新配置重建。
-    let Some(luid) = win32_route::get_interface_luid(if_name) else {
-        warn!(interface = %if_name, "tun: update_routes: interface not resolvable");
-        return Ok(());
-    };
-    if let Err(e) = win32_route::flush_routes(luid) {
-        warn!(err = %e, "tun: update_routes: flush routes failed (continuing)");
-    }
-    let if_index = win32_route::get_if_index(if_name);
-    let has_v4 = cfg.address.iter().any(|a| {
-        parse_addr_prefix(a)
-            .map(|(ip, _)| ip.is_ipv4())
-            .unwrap_or(false)
-    });
-    let has_v6 = cfg.address.iter().any(|a| {
-        parse_addr_prefix(a)
-            .map(|(ip, _)| ip.is_ipv6())
-            .unwrap_or(false)
-    });
-    let mut state = SetupState::default();
-    add_auto_routes(
-        cfg,
-        if_name,
-        Some(luid),
-        if_index,
-        has_v4,
-        has_v6,
-        &mut state,
-    );
-    add_exclude_routes(
-        cfg,
-        if_name,
-        Some(luid),
-        if_index,
-        has_v4,
-        has_v6,
-        &mut state,
-    );
-    Command::new("ipconfig").args(["/flushdns"]).output().ok();
-    info!(interface = %if_name, "tun: routes updated (Windows)");
-    Ok(())
-}
+

@@ -11,7 +11,6 @@ pub struct SetupState {
     pub exclude_routes_v6: Vec<String>,
     pub rule_priorities: Vec<u32>,
     pub wfp_session: usize,
-    pub monitor_id: usize,
 }
 
 pub async fn setup(cfg: &TunInboundConfig, if_name: &str) -> anyhow::Result<SetupState> {
@@ -71,28 +70,11 @@ pub use windows::resolve_actual_interface_name;
 #[cfg(target_os = "windows")]
 pub use windows::wait_for_tun_address;
 
-#[cfg(target_os = "windows")]
-pub use windows::extract_embedded_wintun;
-
 // ── Android 帮助函数 ──────────────────────────────────────────────────────────
 // TUN 设备路径 /dev/tun 及接口名解析。
 
 #[cfg(target_os = "android")]
 pub use android::resolve_tun_interface;
-
-#[allow(unreachable_code)]
-pub fn update_routes(cfg: &TunInboundConfig, if_name: &str) -> anyhow::Result<()> {
-    #[cfg(target_os = "android")]
-    return android::update_routes(cfg, if_name);
-
-    #[cfg(target_os = "linux")]
-    return linux::update_routes(cfg, if_name);
-
-    #[cfg(target_os = "windows")]
-    return windows::update_routes(cfg, if_name);
-
-    Ok(())
-}
 
 // ── 子模块 ──────────────────────────────────────────────────────────────────
 
