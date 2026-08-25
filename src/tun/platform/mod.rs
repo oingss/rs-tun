@@ -7,11 +7,15 @@ pub struct SetupState {
     pub routes_v6: Vec<String>,
     /// Windows：exclude 路由（route_exclude_address，走物理网关 metric=0）。
     /// 记录为 "cidr" 字符串，teardown 时精确删除。
+    #[cfg(target_os = "windows")]
     pub exclude_routes_v4: Vec<String>,
+    #[cfg(target_os = "windows")]
     pub exclude_routes_v6: Vec<String>,
     /// ip rule 优先级（仅 Linux/Android 使用，teardown 时精确删除对应规则）。
     #[cfg(any(target_os = "linux", target_os = "android"))]
     pub rule_priorities: Vec<u32>,
+    /// WFP 会话句柄（仅 Windows strict_route 使用）。
+    #[cfg(target_os = "windows")]
     pub wfp_session: usize,
 }
 
