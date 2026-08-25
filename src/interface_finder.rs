@@ -293,9 +293,12 @@ pub mod windows_iface {
     /// 注意：这里直接用 raw socket handle + `windows` crate 的 WinSock
     /// 绑定，避免引入额外依赖；调用方需保证传入的是合法、尚未关闭的
     /// socket handle。
-    pub fn bind_socket_to_physical_interface(raw_socket: std::os::windows::io::RawSocket, target: IpAddr) {
+    pub fn bind_socket_to_physical_interface(
+        raw_socket: std::os::windows::io::RawSocket,
+        target: IpAddr,
+    ) {
         use ::windows::Win32::Networking::WinSock::{
-            setsockopt, IPPROTO_IP, IPPROTO_IPV6, IP_UNICAST_IF, IPV6_UNICAST_IF, SOCKET,
+            setsockopt, IPPROTO_IP, IPPROTO_IPV6, IPV6_UNICAST_IF, IP_UNICAST_IF, SOCKET,
         };
 
         let sock = SOCKET(raw_socket as usize);
