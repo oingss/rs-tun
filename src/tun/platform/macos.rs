@@ -111,7 +111,7 @@ impl RouteSocket {
     /// macOS utun 设备支持以下 setsockopt 优化：
     /// - `LOCAL_SENDTS` / `LOCAL_RECVTS`：启用时间戳（可选，部分 macOS 版本支持）
     /// - `SO_SNDBUF` / `SO_RCVBUF`：增大发送/接收缓冲区，避免高 PPS 场景下的丢包
-    /// - `F_SETNOSIGPIPE`：防止写 utun 时 SIGPIPE 导致进程退出
+    /// - `SO_NOSIGPIPE`：防止写 utun 时 SIGPIPE 导致进程退出
     ///
     /// 参考 sing-tun darwin_device.go setsockopt 部分 + clash-rs utun 配置。
     #[allow(dead_code)]
@@ -137,11 +137,22 @@ impl RouteSocket {
             )
         };
 
-        // 防止 SIGPIPE（macOS 写关闭的 fd 会触发 SIGPIPE）
-        let _ = unsafe { libc::fcntl(fd, libc::F_SETNOSIGPIPE, 1) };
+        // 防止 SIGPIPE（macOS 写关闭的 fd 会触发 SIGPIPE）。
+        // 注意：libc crate 未导出 `F_SETNOSIGPIPE`（它不是标准 fcntl 常量），
+        // macOS 上禁用 SIGPIPE 的正确方式是 `setsockopt(SOL_SOCKET, SO_NOSIGPIPE)`。
+        let nosigpipe: libc::c_int = 1;
+        let _ = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_NOSIGPIPE,
+                &nosigpipe as *const _ as *const libc::c_void,
+                std::mem::size_of_val(&nosigpipe) as libc::socklen_t,
+            )
+        };
 
         info!(
-            "tun: utun advanced socket options applied (SO_SNDBUF/SO_RCVBUF=4MB, F_SETNOSIGPIPE)"
+            "tun: utun advanced socket options applied (SO_SNDBUF/SO_RCVBUF=4MB, SO_NOSIGPIPE)"
         );
     }
 
