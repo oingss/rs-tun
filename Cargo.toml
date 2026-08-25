@@ -1,0 +1,65 @@
+[package]
+name = "reflex-tun"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "跨平台 TUN 虚拟网卡入站实现，从 reflex 代理项目拆分而来，供任意 Rust 代理项目复用"
+repository = "https://github.com/your-org/reflex-tun"
+readme = "README.md"
+keywords = ["tun", "proxy", "networking", "vpn"]
+categories = ["network-programming"]
+
+[dependencies]
+# 基础异步 / 工具库
+tokio            = { version = "1", features = ["full"] }
+bytes            = "1"
+anyhow           = "1"
+thiserror        = "1"
+tracing          = "0.1"
+futures          = "0.3"
+futures-util     = "0.3"
+log              = "0.4"
+serde            = { version = "1", features = ["derive"] }
+portable-atomic  = { version = "1", features = ["fallback"] }
+socket2          = { version = "0.5", features = ["all"] }
+libc             = "0.2"
+
+# TUN 设备 / 用户态网络栈
+tun              = { version = "0.8", features = ["async"] }
+smoltcp          = { version = "0.13", default-features = false, features = [
+    "std",
+    "log",
+    "medium-ip",
+    "proto-ipv4",
+    "proto-ipv6",
+    "socket-tcp",
+    "socket-udp",
+    "socket-icmp",
+    "async",
+    "socket-tcp-cubic",
+]}
+etherparse       = "0.20"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rtnetlink            = "0.14"
+netlink-packet-route = "0.19"
+netlink-packet-core  = "0.7"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WiFi",
+    "Win32_Networking_WinSock",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_System_Rpc",
+    "Win32_Security",
+    "Win32_NetworkManagement_WindowsFilteringPlatform",
+]}
+
+[dev-dependencies]
+serde_json = "1"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
