@@ -151,9 +151,7 @@ impl RouteSocket {
             )
         };
 
-        info!(
-            "tun: utun advanced socket options applied (SO_SNDBUF/SO_RCVBUF=4MB, SO_NOSIGPIPE)"
-        );
+        info!("tun: utun advanced socket options applied (SO_SNDBUF/SO_RCVBUF=4MB, SO_NOSIGPIPE)");
     }
 
     /// 添加路由条目。
