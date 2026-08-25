@@ -1,0 +1,201 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── 原生编译 + 测试：三大桌面平台 ──────────────────────────────────────────
+  # 只有原生 target 才能跑 `cargo build`（会实际链接 tun/rtnetlink/windows-rs
+  # 等平台相关依赖）和 `cargo test`。
+  native:
+    name: build & test / ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build (debug)
+        run: cargo build --target ${{ matrix.target }} --verbose
+
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }} --verbose
+
+      - name: Run clippy
+        run: cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --target ${{ matrix.target }} --verbose
+
+      - name: Build examples
+        run: cargo build --target ${{ matrix.target }} --examples --verbose
+
+      - name: Check docs
+        run: cargo doc --target ${{ matrix.target }} --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # ── 交叉编译检查：不便原生跑的平台（Linux 交叉架构 + Android）───────────────
+  # 这些 target 只做 `cargo check`：不产出可运行产物，仅验证代码在该
+  # target_os / target_arch 组合下能否类型检查通过（不需要设备/模拟器）。
+  cross-check:
+    name: cross-check / ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+          - aarch64-linux-android
+          - armv7-linux-androideabi
+          - x86_64-linux-android
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Install cargo-ndk (Android targets only)
+        if: contains(matrix.target, 'android')
+        run: cargo install cargo-ndk --locked
+
+      - name: cargo check (Android via cargo-ndk)
+        if: contains(matrix.target, 'android')
+        run: cargo ndk --target ${{ matrix.target }} check --verbose
+
+      - name: cargo check (non-Android cross target)
+        if: ${{ !contains(matrix.target, 'android') }}
+        run: cargo check --target ${{ matrix.target }} --verbose
+
+  # ── Windows 交叉架构：仅 check（GitHub 无 ARM64 Windows runner）────────────
+  windows-cross-check:
+    name: cross-check / aarch64-pc-windows-msvc
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: windows-aarch64-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            windows-aarch64-cargo-
+
+      - name: cargo check
+        run: cargo check --target aarch64-pc-windows-msvc --verbose
+
+  # ── 简单的 downstream smoke test：模拟第三方项目 `path` 依赖引用本 crate ──
+  downstream-smoke:
+    name: downstream integration smoke test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: reflex-tun
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Scaffold a consumer crate depending on reflex-tun via path
+        shell: bash
+        run: |
+          cargo new consumer --bin
+          cd consumer
+          echo 'reflex-tun = { path = "../reflex-tun" }' >> Cargo.toml
+          echo 'tokio = { version = "1", features = ["full"] }' >> Cargo.toml
+          echo 'anyhow = "1"' >> Cargo.toml
+          echo 'serde_json = "1"' >> Cargo.toml
+          cat > src/main.rs <<'EOF'
+          use reflex_tun::{TunInbound, TunInboundConfig};
+
+          #[tokio::main]
+          async fn main() -> anyhow::Result<()> {
+              // 只验证类型能被下游 crate 正确引用/构造，不实际创建设备
+              let cfg: TunInboundConfig = serde_json::from_str(r#"{
+                  "tag": "tun-in",
+                  "address": ["198.18.0.1/16"],
+                  "auto_route": false,
+                  "stack": "system"
+              }"#)?;
+              let (tcp_tx, _tcp_rx) = tokio::sync::mpsc::channel(1);
+              let (udp_tx, _udp_rx) = tokio::sync::mpsc::channel(1);
+              let _inbound = TunInbound::new(cfg, tcp_tx, udp_tx);
+              println!("reflex-tun linked and constructed OK");
+              Ok(())
+          }
+          EOF
+
+      - name: Build consumer crate
+        run: cargo build --manifest-path consumer/Cargo.toml --verbose
