@@ -9,6 +9,8 @@ pub struct SetupState {
     /// 记录为 "cidr" 字符串，teardown 时精确删除。
     pub exclude_routes_v4: Vec<String>,
     pub exclude_routes_v6: Vec<String>,
+    /// ip rule 优先级（仅 Linux/Android 使用，teardown 时精确删除对应规则）。
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub rule_priorities: Vec<u32>,
     pub wfp_session: usize,
 }

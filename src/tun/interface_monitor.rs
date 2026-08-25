@@ -516,7 +516,8 @@ mod tests {
         assert!(diff_events(&[a], &[b]).len() == 1);
         // 无变化
         let c = mk(vec!["192.168.1.2".parse().unwrap()]);
-        assert!(diff_events(std::slice::from_ref(&c), &[c]).is_empty());
+        let c2 = c.clone();
+        assert!(diff_events(&[c], &[c2]).is_empty());
     }
 
     #[cfg(target_os = "linux")]
