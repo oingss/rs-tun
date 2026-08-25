@@ -23,6 +23,10 @@ serde            = { version = "1", features = ["derive"] }
 portable-atomic  = { version = "1", features = ["fallback"] }
 socket2          = { version = "0.5", features = ["all"] }
 libc             = "0.2"
+async-trait      = "0.1"
+once_cell        = "1"
+rand             = { version = "0.8" }
+notify           = { version = "6", default-features = false, features = ["macos_kqueue"] }
 
 # TUN 设备 / 用户态网络栈
 tun              = { version = "0.8", features = ["async"] }
