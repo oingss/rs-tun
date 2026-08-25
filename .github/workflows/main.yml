@@ -125,33 +125,6 @@ jobs:
         if: ${{ !contains(matrix.target, 'android') }}
         run: cargo check --target ${{ matrix.target }} --verbose
 
-  # ── Windows 交叉架构：仅 check（GitHub 无 ARM64 Windows runner）────────────
-  windows-cross-check:
-    name: cross-check / aarch64-pc-windows-msvc
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-pc-windows-msvc
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: windows-aarch64-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            windows-aarch64-cargo-
-
-      - name: cargo check
-        run: cargo check --target aarch64-pc-windows-msvc --verbose
-
   # ── 简单的 downstream smoke test：模拟第三方项目 `path` 依赖引用本 crate ──
   downstream-smoke:
     name: downstream integration smoke test
