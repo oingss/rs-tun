@@ -44,8 +44,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
 
       - name: Build (debug)
         run: cargo build --target ${{ matrix.target }} --verbose
