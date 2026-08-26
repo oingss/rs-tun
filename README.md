@@ -70,6 +70,61 @@ async fn main() -> anyhow::Result<()> {
 sudo -E cargo run --example dump_traffic
 ```
 
+## sing-tun 风格用法
+
+如果你更熟悉 [sing-tun](https://github.com/SagerNet/sing-tun)（sing-box 底层用的 TUN 库）的
+`Options` / `Handler` / `Stack` 心智模型，本 crate 提供了一套形状对应的接口，
+背后是同一套引擎，两种用法可以任选：
+
+```rust,ignore
+use std::sync::Arc;
+use async_trait::async_trait;
+use reflex_tun::{Handler, InboundTcpStream, InboundUdpPacket, Options, StackKind, StackOptions};
+
+struct MyHandler;
+
+#[async_trait]
+impl Handler for MyHandler {
+    async fn new_connection(&self, conn: InboundTcpStream) {
+        // 对应 sing-tun Handler.NewConnectionEx：拿到 TCP 连接后自行路由/转发
+        let _ = conn;
+    }
+    async fn new_packet(&self, packet: InboundUdpPacket) {
+        // 对应 sing-tun Handler.NewPacketConnectionEx
+        let _ = packet;
+    }
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let options = Options {
+        inet4_address: vec![("198.18.0.1".parse().unwrap(), 16)],
+        auto_route: true,
+        stack: StackKind::System, // 或 Gvisor / Mixed
+        ..Options::default()
+    };
+
+    let mut stack = reflex_tun::new_stack(StackOptions {
+        tun_options: options,
+        tag: "tun-in".to_string(),
+        handler: Arc::new(MyHandler),
+        dns_hijack: false,
+    })
+    .await?;
+
+    stack.start().await?;
+    // stack.close().await?; // 需要主动停止时调用
+    std::future::pending::<()>().await;
+    Ok(())
+}
+```
+
+字段命名对照（Go → Rust）：`Options.Inet4Address` → `Options::inet4_address`，
+`Options.AutoRoute` → `auto_route`，`NewStack(stack, ...)` → `new_stack(StackOptions { tun_options: Options { stack, .. }, .. })`。
+详见 [`src/stack.rs`](src/stack.rs) 顶部文档注释，里面如实列出了与 sing-tun 的几点行为差异
+（主要是 `Tun` 创建与 `Stack` 启动在本 crate 里是合并成一步的，`close()` 目前通过中止
+后台任务实现，不保证执行路由清理）。
+
 ## 配置字段
 
 `TunInboundConfig` 与 reflex 主项目 YAML/JSON 配置中 `type: tun` 的入站
